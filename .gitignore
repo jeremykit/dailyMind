@@ -1,0 +1,12 @@
+# 临时文件
+temp/
+output/
+*.mp3
+*.mp4
+*.m4a
+*.part
+*.ytdl
+
+# Cookies（敏感信息）
+cookies.txt
+cookies_netscape.txt

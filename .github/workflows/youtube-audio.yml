@@ -1,0 +1,99 @@
+name: YouTube Audio Extractor
+
+on:
+  schedule:
+    # 每小时运行一次
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    # 手动触发
+
+env:
+  CHANNEL_URL: "https://www.youtube.com/@summit24-138/videos"
+  R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+  STORAGE_PATH: "daily"
+
+jobs:
+  fetch-audio:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg jq rclone
+          # 安装最新版 yt-dlp
+          curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          chmod +x /usr/local/bin/yt-dlp
+          yt-dlp --version
+
+      - name: Install Deno (for YouTube JS challenges)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Setup YouTube cookies
+        run: |
+          mkdir -p ./temp
+          # 从 Secret 读取 cookies 并转换为 Netscape 格式
+          cat > ./temp/cookies.txt << 'HEADER'
+          # Netscape HTTP Cookie File
+          # This file was generated for yt-dlp
+
+          HEADER
+
+          # 解析 cookies 字符串
+          IFS='; ' read -ra cookies <<< "${{ secrets.YOUTUBE_COOKIES }}"
+          for cookie in "${cookies[@]}"; do
+            name="${cookie%%=*}"
+            value="${cookie#*=}"
+            echo -e ".youtube.com\tTRUE\t/\tTRUE\t0\t$name\t$value" >> ./temp/cookies.txt
+          done
+
+      - name: Configure rclone for R2
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${{ secrets.R2_ACCESS_KEY_ID }}
+          secret_access_key = ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          endpoint = https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          acl = private
+          EOF
+
+      - name: Download index.json and list existing files from R2
+        run: |
+          mkdir -p ./temp
+          # 下载 index.json
+          rclone copy r2:${{ env.R2_BUCKET }}/${{ env.STORAGE_PATH }}/index.json ./temp/ 2>/dev/null || true
+          if [ ! -f ./temp/index.json ]; then
+            echo '{"channel":"@summit24-138","lastUpdated":"","videos":[]}' > ./temp/index.json
+          fi
+          # 获取 R2 中已存在的文件列表
+          rclone lsf r2:${{ env.R2_BUCKET }}/${{ env.STORAGE_PATH }}/ --include "*.mp3" > ./temp/existing_files.txt 2>/dev/null || touch ./temp/existing_files.txt
+          echo "==> R2 中已有 $(wc -l < ./temp/existing_files.txt) 个文件"
+
+      - name: Fetch and process new videos
+        run: |
+          chmod +x ./scripts/fetch-audio.sh
+          ./scripts/fetch-audio.sh
+
+      - name: Upload to R2
+        run: |
+          # 上传新的 MP3 文件
+          if [ -d "./output" ] && [ "$(ls -A ./output 2>/dev/null)" ]; then
+            rclone copy ./output/ r2:${{ env.R2_BUCKET }}/${{ env.STORAGE_PATH }}/ --include "*.mp3"
+            echo "==> 已上传 $(ls ./output/*.mp3 2>/dev/null | wc -l) 个文件"
+          fi
+          # 上传更新后的 index.json
+          if [ -f "./temp/index.json" ]; then
+            rclone copy ./temp/index.json r2:${{ env.R2_BUCKET }}/${{ env.STORAGE_PATH }}/
+          fi
+
+      - name: Cleanup
+        run: |
+          rm -rf ./temp ./output
