@@ -25,19 +25,25 @@ if [ ! -f "$EXISTING_FILES" ]; then
     touch "$EXISTING_FILES"
 fi
 
-# 构建 yt-dlp cookies 参数
-COOKIES_ARG=""
-if [ -f "$COOKIES_FILE" ]; then
-    COOKIES_ARG="--cookies $COOKIES_FILE"
+# 构建 yt-dlp 基础参数
+YTDLP_ARGS=""
+if [ -f "$COOKIES_FILE" ] && [ -s "$COOKIES_FILE" ]; then
+    YTDLP_ARGS="--cookies $COOKIES_FILE"
     echo "==> 使用 cookies 文件"
 fi
 
+# 添加绕过检测的参数
+YTDLP_ARGS="$YTDLP_ARGS --extractor-args youtube:player_client=web_safari,android_music"
+YTDLP_ARGS="$YTDLP_ARGS --sleep-interval 2 --max-sleep-interval 5"
+YTDLP_ARGS="$YTDLP_ARGS --retries 3"
+
+echo "==> yt-dlp 版本: $(yt-dlp --version)"
 echo "==> 获取频道最新视频列表..."
 
 # 获取最新视频列表（最近10个）
-yt-dlp $COOKIES_ARG --flat-playlist --print "%(id)s|%(title)s|%(upload_date)s" \
+yt-dlp $YTDLP_ARGS --flat-playlist --print "%(id)s|%(title)s|%(upload_date)s" \
     --playlist-end 10 \
-    "$CHANNEL_URL" > ./temp/video_list.txt 2>/dev/null || true
+    "$CHANNEL_URL" > ./temp/video_list.txt 2>&1 || true
 
 if [ ! -s ./temp/video_list.txt ]; then
     echo "未能获取视频列表，退出"
@@ -92,7 +98,7 @@ while IFS='|' read -r VIDEO_ID TITLE UPLOAD_DATE; do
     fi
 
     # 下载音频（优先使用格式 140 m4a，然后转换为 mp3）
-    yt-dlp $COOKIES_ARG \
+    yt-dlp $YTDLP_ARGS \
         -f "140/bestaudio[ext=m4a]/bestaudio" \
         -x --audio-format mp3 --audio-quality 128K \
         --output "$OUTPUT_DIR/$FILENAME" \
