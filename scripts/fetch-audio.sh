@@ -27,9 +27,16 @@ fi
 
 # 构建 yt-dlp 基础参数
 YTDLP_ARGS=""
+
+# 检查 cookies 文件是否有效（必须是 Netscape 格式）
 if [ -f "$COOKIES_FILE" ] && [ -s "$COOKIES_FILE" ]; then
-    YTDLP_ARGS="--cookies $COOKIES_FILE"
-    echo "==> 使用 cookies 文件"
+    # 检查是否是 Netscape 格式（包含 tab 分隔的行）
+    if grep -qE '^\.?[a-zA-Z].*\t(TRUE|FALSE)\t' "$COOKIES_FILE" 2>/dev/null; then
+        YTDLP_ARGS="--cookies $COOKIES_FILE"
+        echo "==> 使用 Netscape 格式 cookies 文件"
+    else
+        echo "==> cookies 文件不是 Netscape 格式，跳过使用"
+    fi
 fi
 
 # 添加绕过检测的参数
