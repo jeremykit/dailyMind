@@ -10,3 +10,4 @@ output/
 # Cookies（敏感信息）
 cookies.txt
 cookies_netscape.txt
+.env
